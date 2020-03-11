@@ -4,23 +4,27 @@ import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
-import javafx.scene.control.Button;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.*;
-import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
-import javax.swing.filechooser.FileSystemView;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.*;
-import java.text.DecimalFormat;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class ViewController {
 
@@ -29,12 +33,17 @@ public class ViewController {
 
     public TableColumn<FileModel, String> left_table_list;
     public TableColumn<FileModel, String> right_table_list;
+
     public Accordion disks_accordion;
+
+    private Label left_header = new Label();
+    private Label right_header = new Label();
 
     private ObservableList<FileModel> left_files;
     private ObservableList<FileModel> right_files;
 
-    private DecimalFormat gigabytesTextFormat = new DecimalFormat("#.##");
+    private DiskHelper diskHelper;
+    private static Path copiedFile;
 
     @FXML
     public void initialize() {
@@ -42,8 +51,15 @@ public class ViewController {
             left_files = FXCollections.observableArrayList();
             right_files = FXCollections.observableArrayList();
 
-            getDirectoryContent("C:\\", left_files);
-            getDirectoryContent("D:\\", right_files);
+            diskHelper = new DiskHelper();
+
+
+            left_table_list.setGraphic(getHeaderLayout(left_header, Position.LEFT_TABLE));
+            right_table_list.setGraphic(getHeaderLayout(right_header, Position.RIGHT_TABLE));
+            getDirectoryContent("C:\\", Position.LEFT_TABLE);
+            getDirectoryContent("D:\\", Position.RIGHT_TABLE);
+            setCurrentPathField("C:\\", Position.LEFT_TABLE);
+            setCurrentPathField("D:\\", Position.RIGHT_TABLE);
             initializeTables();
             populateDiskPanels();
 
@@ -52,7 +68,22 @@ public class ViewController {
         }
     }
 
-    private void populateDiskPanels(){
+    private HBox getHeaderLayout(Label headerLabel, Position position) {
+        Hyperlink arrow = new Hyperlink("⬆");
+        arrow.setStyle("-fx-underline: false");
+        arrow.setAlignment(Pos.CENTER_RIGHT);
+        arrow.setOnMouseClicked(event -> goToParentDirectory(headerLabel.getText(), position));
+
+        Region region1 = new Region();
+        HBox.setHgrow(region1, Priority.ALWAYS);
+
+        HBox box = new HBox(headerLabel, region1, arrow);
+        box.setPadding(new Insets(8));
+
+        return box;
+    }
+
+    private void populateDiskPanels() {
         for (Path root : FileSystems.getDefault().getRootDirectories()) {
             try {
                 FileStore store = Files.getFileStore(root);
@@ -62,30 +93,22 @@ public class ViewController {
                 disks_accordion.getPanes().add(
                         new TitledPane(root.toString(),
                                 new VBox(
-                                        getDiskNameLabel(root.toFile()),
-                                        new ProgressBar(getUsedDiskSpaceInPercents(usableSpace, totalSpace)),
-                                        getSpaceDescLabel(usableSpace, totalSpace))));
+                                        diskHelper.getDiskNameLabel(root.toFile()),
+                                        new ProgressBar(diskHelper.getUsedDiskSpaceInPercents(usableSpace, totalSpace)),
+                                        diskHelper.getSpaceDescLabel(usableSpace, totalSpace))));
             } catch (IOException e) {
                 System.out.println("error querying space: " + e.toString());
             }
         }
     }
 
-    private Label getDiskNameLabel(File disk) {
-        String diskName = FileSystemView.getFileSystemView().getSystemDisplayName(disk);
-        return new Label(diskName);
-    }
+    private void setCurrentPathField(String text, Position position) {
+        if (position == Position.RIGHT_TABLE) {
+            right_header.setText(text);
+            return;
+        }
 
-    private Label getSpaceDescLabel(long freeSpace, long totalSpace) {
-        return new Label(formatSpaceToGigabytes(freeSpace) + " GB wolnych z " + formatSpaceToGigabytes(totalSpace) + " GB");
-    }
-
-    private String formatSpaceToGigabytes(long bytesCount) {
-        return gigabytesTextFormat.format(bytesCount / (Math.pow(1024, 3)));
-    }
-
-    private double getUsedDiskSpaceInPercents(long freeSpace, long totalSpace) {
-        return ((totalSpace - freeSpace) / (double) totalSpace);
+        left_header.setText(text);
     }
 
     private void initializeTables() {
@@ -97,6 +120,9 @@ public class ViewController {
 
         left_table.setRowFactory(tableView -> configureRow(Position.LEFT_TABLE));
         right_table.setRowFactory(tableView -> configureRow(Position.RIGHT_TABLE));
+
+        left_table.setPlaceholder(new Label("Ten folder jest pusty"));
+        right_table.setPlaceholder(new Label("Ten folder jest pusty"));
     }
 
     private TableRow<FileModel> configureRow(Position position) {
@@ -110,12 +136,15 @@ public class ViewController {
 
     private void createContextMenu(TableRow<FileModel> row, Position position) {
         final ContextMenu contextMenu = new ContextMenu();
-        TableView<FileModel> table = position == Position.LEFT_TABLE ? left_table : right_table;
 
-        final MenuItem openFileMenu = createContextMenuItem("Otwórz", event -> onOpenAction(row.getItem(), position));
-        final MenuItem removeMenuItem = createContextMenuItem("Usuń", event -> table.getItems().remove(row.getItem()));
+        final MenuItem openFileMenuItem = createContextMenuItem("Otwórz", event -> onOpenAction(row.getItem(), position));
+        final MenuItem copyFileMenuItem = createContextMenuItem("Kopiuj", event -> onCopyAction(row.getItem()));
+        final MenuItem pasteFileMenuItem = createContextMenuItem("Wklej", event -> onPasteAction(position));
+        final MenuItem moveFileMenuItem = createContextMenuItem("Przenieś do...", event -> onMoveAction());
+        final MenuItem newDirectoryMenuItem = createContextMenuItem("Nowy folder", event -> onNewDirectoryAction(position, row.getItem()));
+        final MenuItem removeMenuItem = createContextMenuItem("Usuń", event -> onRemoveAction(position, row.getItem()));
+        contextMenu.getItems().addAll(openFileMenuItem, copyFileMenuItem, pasteFileMenuItem, moveFileMenuItem, newDirectoryMenuItem, removeMenuItem);
 
-        contextMenu.getItems().addAll(openFileMenu, removeMenuItem);
         row.contextMenuProperty().bind(
                 Bindings.when(row.emptyProperty())
                         .then((ContextMenu) null)
@@ -131,13 +160,86 @@ public class ViewController {
         onOpenAction(row.getItem(), position);
     }
 
-    private void onOpenAction(FileModel rowData, Position position) {
-        if (rowData.isFile()) {
-            openFileWithCmd(rowData.getName());
+    private void onCopyAction(FileModel model) {
+        if (Utils.isNullOrWhitespace(model.getAbsolutePath()) || !Files.exists(Paths.get(model.getAbsolutePath()))) {
             return;
         }
 
-        getDirectoryContent(rowData.getName(), position == Position.LEFT_TABLE ? left_files : right_files);
+        copiedFile = Paths.get(model.getAbsolutePath());
+    }
+
+    //TODO Add alerts
+    //TODO Implement + przejście do listy dysków
+    //TODO Dodać drag and drop pomiędzy tabelami
+    //TODO Dodać ikonkę
+    private void onMoveAction() {
+
+    }
+
+    //TODO Obsłużyć AccessDeniedException
+    private void onPasteAction(Position position) {
+        try {
+            String targetPath = position == Position.LEFT_TABLE ? left_header.getText() : right_header.getText();
+
+            if (!copiedFile.toFile().exists() || Utils.isNullOrWhitespace(targetPath)) {
+                return;
+            }
+
+            Path targetFile = Files.copy(copiedFile, Paths.get(targetPath, copiedFile.getFileName().toString()), StandardCopyOption.REPLACE_EXISTING);
+
+            if(Files.exists(targetFile)){
+                getDirectoryContent(targetPath, position);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    private void onNewDirectoryAction(Position position, FileModel model) {
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle("Tworzenie folderu");
+        dialog.setHeaderText(null);
+        dialog.setContentText("Wpisz nazwę folderu:");
+
+        Optional<String> result = dialog.showAndWait();
+
+        result.ifPresent(name -> System.out.println("Your name: " + name));
+    }
+
+    private void onRemoveAction(Position position, FileModel model) {
+        if (position == Position.LEFT_TABLE) {
+            if (removeSelectedElement(model)) {
+                left_files.remove(model);
+            }
+
+            return;
+        }
+
+        if (removeSelectedElement(model)) {
+            right_files.remove(model);
+        }
+    }
+
+    private boolean removeSelectedElement(FileModel model) {
+        if (model.isFile()) {
+            return deleteFile(model.getAbsolutePath());
+        }
+
+        return deleteDirectory(model.getAbsolutePath());
+    }
+
+    private void onOpenAction(FileModel rowData, Position position) {
+        try {
+            if (rowData.isFile()) {
+                openFileWithCmd(rowData.getAbsolutePath());
+                return;
+            }
+
+            getDirectoryContent(rowData.getAbsolutePath(), position);
+            setCurrentPathField(rowData.getAbsolutePath(), position);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
     }
 
     //TODO Fix and use this
@@ -152,23 +254,43 @@ public class ViewController {
         Desktop.getDesktop().open(tempOutput.toFile());
     }
 
-    private void openFileWithCmd(String fileName) {
+    private void openFileWithCmd(String filePath) {
         try {
-            Runtime.getRuntime().exec("cmd /C \"\"" + fileName + "\"\"");
+            Runtime.getRuntime().exec("cmd /C \"\"" + filePath + "\"\"");
         } catch (Exception ex) {
             ex.printStackTrace();
         }
     }
 
-    private void getDirectoryContent(String path, ObservableList<FileModel> collection) {
+    private void getDirectoryContent(String directoryPath, Position position) throws IOException {
+        if (position == Position.LEFT_TABLE) {
+            left_files.setAll(getCurrentDirectoryContent(directoryPath));
+            return;
+        }
+
+        right_files.setAll(getCurrentDirectoryContent(directoryPath));
+    }
+
+    private void goToParentDirectory(String currentPath, Position position) {
         try {
-            collection.clear();
-            Files.walk(Paths.get(path), 1).forEach(x -> {
-                collection.add(new FileModel(x.toAbsolutePath().toString(), x.toFile().isFile()));
-            });
+            String parentPath = Paths.get(currentPath).getParent().toString();
+            if (Utils.isNullOrWhitespace(parentPath)) {
+                return;
+            }
+
+            setCurrentPathField(parentPath, position);
+            getDirectoryContent(parentPath, position);
         } catch (Exception ex) {
             ex.printStackTrace();
         }
+    }
+
+    private List<FileModel> getCurrentDirectoryContent(String directoryPath) throws IOException {
+        return Files.walk(Paths.get(directoryPath), 1)
+                .filter(x -> Files.isReadable(x) && !x.toAbsolutePath().equals(Paths.get(directoryPath).toAbsolutePath()))
+                .map(path -> new FileModel(path.toFile().getName(), path.toAbsolutePath().toString(), path.toFile().isFile()))
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private MenuItem createContextMenuItem(String text, EventHandler<ActionEvent> value) {
@@ -176,5 +298,42 @@ public class ViewController {
         item.setOnAction(value);
 
         return item;
+    }
+
+    private boolean deleteFile(String path) {
+        try {
+            Path fileToDelete = Paths.get(path);
+
+            if (!Files.exists(fileToDelete)) {
+                return true;
+            }
+
+            Files.delete(fileToDelete);
+
+            return !Files.exists(fileToDelete);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return false;
+        }
+    }
+
+    private boolean deleteDirectory(String path) {
+        try {
+            Path directoryToDelete = Paths.get(path);
+
+            if (!Files.exists(directoryToDelete)) {
+                return true;
+            }
+
+            Files.walk(directoryToDelete)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+
+            return !Files.exists(directoryToDelete);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return false;
+        }
     }
 }
