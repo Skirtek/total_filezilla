@@ -2,10 +2,8 @@ import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
-
-import java.io.File;
-import java.net.URL;
 
 public class Main extends Application {
 
@@ -14,11 +12,14 @@ public class Main extends Application {
     }
 
     public void start(Stage primaryStage) throws Exception {
-        URL url = new File("src/main/resources/view.fxml").toURI().toURL();
-        Parent root = FXMLLoader.load(url);
-        primaryStage.setTitle("Lab1");
+        FXMLLoader loader = new FXMLLoader(getClass().getResource("view.fxml"));
+        Parent root = loader.load();
+        primaryStage.setTitle("Total Filezilla v1.0");
         primaryStage.setScene(new Scene(root, 300, 275));
         primaryStage.setMaximized(true);
+        primaryStage.getIcons().add(new Image(getClass().getResourceAsStream("icon.png")));
+        ViewController controller = loader.getController();
+        controller.setStage(primaryStage);
         primaryStage.show();
     }
 }

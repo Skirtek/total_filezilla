@@ -2,11 +2,13 @@ public class FileModel implements Comparable<FileModel>{
     private String name;
     private String absolutePath;
     private boolean isFile;
+    private boolean isDisk;
 
-    public FileModel(String name, String absolutePath, boolean isFile){
+    public FileModel(String name, String absolutePath, boolean isFile, boolean isDisk){
         this.name = name;
         this.absolutePath = absolutePath;
         this.isFile = isFile;
+        this.isDisk = isDisk;
     }
 
     public String getName() {
@@ -33,6 +35,13 @@ public class FileModel implements Comparable<FileModel>{
         this.absolutePath = absolutePath;
     }
 
+    public boolean isDisk() {
+        return isDisk;
+    }
+
+    public void setDisk(boolean disk) {
+        isDisk = disk;
+    }
 
     @Override
     public int compareTo(FileModel o) {
