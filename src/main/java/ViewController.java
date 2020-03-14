@@ -48,11 +48,13 @@ public class ViewController {
     private ObservableList<FileModel> right_files;
 
     private DiskHelper diskHelper;
+    private PathHelper pathHelper;
+
     private static Path copiedFile;
 
     private Stage stage;
 
-    public void setStage(Stage stage) {
+    void setStage(Stage stage) {
         this.stage = stage;
     }
 
@@ -63,7 +65,7 @@ public class ViewController {
             right_files = FXCollections.observableArrayList();
 
             diskHelper = new DiskHelper();
-
+            pathHelper = new PathHelper();
 
             left_table_list.setGraphic(getHeaderLayout(left_header, Position.LEFT_TABLE));
             right_table_list.setGraphic(getHeaderLayout(right_header, Position.RIGHT_TABLE));
@@ -170,10 +172,11 @@ public class ViewController {
 
         final MenuItem copyFileMenuItem = createContextMenuItem("Kopiuj", event -> onCopyAction(row.getItem()));
         final MenuItem pasteFileMenuItem = createContextMenuItem("Wklej", event -> onPasteAction(position));
-        final MenuItem moveFileMenuItem = createContextMenuItem("Przenieś do...", event -> onMoveAction(row.getItem()));
+        final MenuItem moveFileMenuItem = createContextMenuItem("Przenieś do...", event -> onMoveAction(row.getItem(), position));
         final MenuItem newDirectoryMenuItem = createContextMenuItem("Nowy folder", event -> onNewDirectoryAction(position, row.getItem()));
+        final MenuItem renameMenuItem = createContextMenuItem("Zmień nazwę", event -> onRenameAction(position, row.getItem()));
         final MenuItem removeMenuItem = createContextMenuItem("Usuń", event -> onRemoveAction(position, row.getItem()));
-        contextMenu.getItems().addAll(openFileMenuItem, copyFileMenuItem, pasteFileMenuItem, moveFileMenuItem, newDirectoryMenuItem, removeMenuItem);
+        contextMenu.getItems().addAll(openFileMenuItem, copyFileMenuItem, pasteFileMenuItem, moveFileMenuItem, newDirectoryMenuItem, renameMenuItem, removeMenuItem);
 
         row.contextMenuProperty().bind(
                 Bindings.when(row.emptyProperty())
@@ -189,12 +192,49 @@ public class ViewController {
 
         onOpenAction(row.getItem(), position);
     }
-
-    //TODO Add alerts
-    //TODO Zablokowanie akcji na dyskach oprócz Otwórz
+    
     //TODO Dodać drag and drop pomiędzy tabelami
+    //TODO klasa z constami na teksty
+    private void onRenameAction(Position position, FileModel model) {
+        try {
+
+            if(model.isDisk()){
+                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwa zmiana nazwy dysku.");
+                return;
+            }
+
+            String type = model.isFile() ? "pliku" : "katalogu";
+            Optional<String> result = showInputDialog("Zmiana nazwy", "Wpisz nową nazwę " + type + ":");
+
+            if (!result.isPresent() || !Utils.isDirectoryNameValid(result.get())) {
+                showAlert(Alert.AlertType.WARNING, "Zła nazwa " + type, "Nazwa " + type + " jest błędna lub zawiera niedozwolony znak.");
+                return;
+            }
+
+            Optional<String> parent = getParentAbsolutePath(model.getAbsolutePath());
+
+            if (parent.isPresent()) {
+                Path newPath = model.isFile()
+                        ? pathHelper.getFileName(parent.get(), model.getAbsolutePath(), result.get())
+                        : pathHelper.getDirectoryName(parent.get(), result.get());
+
+                Files.move(Paths.get(model.getAbsolutePath()), newPath.toAbsolutePath(), StandardCopyOption.REPLACE_EXISTING);
+                setCurrentPathField(parent.get(), position);
+                getDirectoryContent(parent.get(), position);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Zmiana nazwy " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodła się z powodu krytycznego błędu.");
+        }
+    }
+
     private void onCopyAction(FileModel model) {
         try {
+            if(model.isDisk()){
+                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwa skopiowanie całego dysku.");
+                return;
+            }
+
             if (Utils.isNullOrWhitespace(model.getAbsolutePath()) || !Files.exists(Paths.get(model.getAbsolutePath()))) {
                 return;
             }
@@ -202,34 +242,48 @@ public class ViewController {
             copiedFile = Paths.get(model.getAbsolutePath());
         } catch (Exception ex) {
             ex.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Skopiowanie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
-    private void onMoveAction(FileModel model) {
+    private void onMoveAction(FileModel model, Position position) {
         try {
+            if(model.isDisk()){
+                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwe przeniesienie całego dysku.");
+                return;
+            }
+
             DirectoryChooser directoryChooser = new DirectoryChooser();
             directoryChooser.setTitle("Wybierz folder docelowy");
-            //TODO może helper na to paths.get
             directoryChooser.setInitialDirectory(Paths.get(model.getAbsolutePath()).getParent().toFile());
             File file = directoryChooser.showDialog(stage);
 
-            if(file != null){
-                //TODO sprawdzić przenoszenie całych folderów
+            if (file != null) {
                 Files.move(Paths.get(model.getAbsolutePath()), Paths.get(file.getAbsolutePath(), model.getName()), StandardCopyOption.REPLACE_EXISTING);
+                setCurrentPathField(file.getAbsolutePath(), position);
+                getDirectoryContent(file.getAbsolutePath(), position);
             }
         } catch (Exception ex) {
             ex.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Przeniesienie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
     private void onPasteAction(Position position) {
         try {
+
             String targetPath = position == Position.LEFT_TABLE ? left_header.getText() : right_header.getText();
 
             if (!copiedFile.toFile().exists() || Utils.isNullOrWhitespace(targetPath)) {
+                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Wklejenie pliku w tym miejscu nie jest możliwe.");
                 return;
             }
-            //TODO kopiowanie folderów
+
+            if (copiedFile.toFile().isDirectory()) {
+                onDirectoryPaste(targetPath, position);
+                return;
+            }
+
             Path targetFile = Files.copy(copiedFile, Paths.get(targetPath, copiedFile.getFileName().toString()), StandardCopyOption.REPLACE_EXISTING);
 
             if (Files.exists(targetFile)) {
@@ -237,51 +291,90 @@ public class ViewController {
             }
         } catch (Exception ex) {
             if (ex instanceof AccessDeniedException) {
-                //TODO Alert
+                showAlert(Alert.AlertType.ERROR, "Brak uprawnień", "Brak uprawnień do umieszczenia pliku/katalogu w wybranym katalogu");
                 return;
             }
 
             ex.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Wklejenie nie powiodło się z powodu krytycznego błędu.");
+        }
+    }
+
+    private void onDirectoryPaste(String targetPath, Position position) throws IOException {
+        Path targetDirectory = Paths.get(targetPath, copiedFile.getFileName().toString());
+
+        if (!Files.exists(targetDirectory)) {
+            Files.createDirectory(targetDirectory);
+        }
+
+        Files.walk(copiedFile)
+                .forEach(source -> {
+                    try {
+                        Path target = targetDirectory.resolve(copiedFile.relativize(source));
+                        if (!Files.exists(target)) {
+                            Files.copy(source, target);
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Wklejenie nie powiodło się z powodu krytycznego błędu.");
+                    }
+                });
+
+        if (Files.exists(targetDirectory)) {
+            getDirectoryContent(targetPath, position);
         }
     }
 
     private void onNewDirectoryAction(Position position, FileModel model) {
         try {
-            TextInputDialog dialog = new TextInputDialog();
-            dialog.setTitle("Tworzenie folderu");
-            dialog.setHeaderText(null);
-            dialog.setContentText("Wpisz nazwę folderu:");
-
-            Optional<String> result = dialog.showAndWait();
-
-            if (result.isPresent() && Utils.isDirectoryNameValid(result.get())) {
-                //TODO jakoś ladniej
-                Path resultPath = Files.createDirectory(Paths.get(Paths.get(model.getAbsolutePath()).getParent().toString(), result.get()));
-
-                if (!Files.exists(resultPath)) {
-                    //TODO Alert
-                    return;
-                }
-
-                getDirectoryContent(resultPath.getParent().toString(), position);
-            } else {
-                //TODO Alert
+            if (model.isDisk()) {
+                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Utworzenie nowego katalogu w tym miejscu jest niedozwolone.");
+                return;
             }
+
+            Optional<String> result = showInputDialog("Tworzenie katalogu", "Wpisz nazwę katalogu:");
+
+            if (!result.isPresent() || !Utils.isDirectoryNameValid(result.get())) {
+                showAlert(Alert.AlertType.WARNING, "Zła nazwa katalogu", "Nazwa katalogu jest błędna lub zawiera niedozwolony znak.");
+                return;
+            }
+
+            Optional<String> parent = getParentAbsolutePath(model.getAbsolutePath());
+
+            if (!parent.isPresent()) {
+                return;
+            }
+
+            Path resultPath = Files.createDirectory(Paths.get(parent.get(), result.get()));
+
+            if (!Files.exists(resultPath)) {
+                showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Utworzenie nowego katalogu nie powiodło się.");
+                return;
+            }
+
+            getDirectoryContent(resultPath.getParent().toString(), position);
         } catch (Exception ex) {
             ex.printStackTrace();
-            //TODO alert
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Utworzenie nowego katalogu nie powiodło się z powodu krytycznego błędu.");
         }
+    }
+
+    private Optional<String> getParentAbsolutePath(String childPath) {
+        Path parent = Paths.get(childPath).getParent();
+
+        return parent != null ? Optional.of(parent.toString()) : Optional.empty();
     }
 
     private void onRemoveAction(Position position, FileModel model) {
         try {
+            if (model.isDisk()) {
+                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Usunięcie partycji jest niedozwolone.");
+                return;
+            }
 
-            //TODO Podmienić na tak/nie
-            TextInputDialog dialog = new TextInputDialog();
-            dialog.setTitle("Usuwasz plik " + model.getName());
-            dialog.setHeaderText(null);
-            dialog.setContentText("Wpisz nazwę folderu:");
-            Optional<String> result = dialog.showAndWait();
+            if (!getFeedbackFromConfirmationAlert("Usunięcie pliku", "Czy na pewno chcesz usunąć " + model.getName() + "?")) {
+                return;
+            }
 
             if (position == Position.LEFT_TABLE) {
                 if (removeSelectedElement(model)) {
@@ -295,7 +388,36 @@ public class ViewController {
             }
         } catch (Exception ex) {
             ex.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Usunięcie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
+    }
+
+    private Optional<String> showInputDialog(String header, String message) {
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle(header);
+        dialog.setHeaderText(null);
+        dialog.setContentText(message);
+
+        return dialog.showAndWait();
+    }
+
+    private void showAlert(Alert.AlertType type, String header, String message) {
+        Alert alert = new Alert(type);
+        alert.setTitle(header);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+
+        alert.showAndWait();
+    }
+
+    private boolean getFeedbackFromConfirmationAlert(String header, String message) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle(header);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        return result.isPresent() && result.get() == ButtonType.OK;
     }
 
     private void onOpenAction(FileModel rowData, Position position) {
@@ -309,10 +431,12 @@ public class ViewController {
             setCurrentPathField(rowData.getAbsolutePath(), position);
         } catch (Exception ex) {
             if (ex instanceof AccessDeniedException) {
-                //TODO Alert
+                showAlert(Alert.AlertType.ERROR, "Brak uprawnień", "Otwarcie " + (rowData.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu braku wymaganych uprawnień.");
                 return;
             }
+
             ex.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Otwarcie " + (rowData.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
@@ -336,12 +460,8 @@ public class ViewController {
         Desktop.getDesktop().open(tempOutput.toFile());
     }
 
-    private void openFileWithCmd(String filePath) {
-        try {
-            Runtime.getRuntime().exec("cmd /C \"\"" + filePath + "\"\"");
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
+    private void openFileWithCmd(String filePath) throws IOException {
+        Runtime.getRuntime().exec("cmd /C \"\"" + filePath + "\"\"");
     }
 
     private void getDirectoryContent(String directoryPath, Position position) throws IOException {
@@ -371,17 +491,18 @@ public class ViewController {
     }
 
     private void showDiskList(Position position) {
-        //TODO wyczyść nagłówek
         List<FileModel> disks = getDisksCollection()
                 .stream()
                 .map(disk -> new FileModel(disk.toString(), disk.toString(), false, true))
                 .collect(Collectors.toList());
 
         if (position == Position.LEFT_TABLE) {
+            left_header.setText("");
             left_files.setAll(disks);
             return;
         }
 
+        right_header.setText("");
         right_files.setAll(disks);
     }
 
