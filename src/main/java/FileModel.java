@@ -15,32 +15,16 @@ public class FileModel implements Comparable<FileModel>{
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
-
     public boolean isFile() {
         return isFile;
-    }
-
-    public void setFile(boolean file) {
-        isFile = file;
     }
 
     public String getAbsolutePath() {
         return absolutePath;
     }
 
-    public void setAbsolutePath(String absolutePath) {
-        this.absolutePath = absolutePath;
-    }
-
     public boolean isDisk() {
         return isDisk;
-    }
-
-    public void setDisk(boolean disk) {
-        isDisk = disk;
     }
 
     @Override

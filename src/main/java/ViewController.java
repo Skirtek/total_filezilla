@@ -1,3 +1,4 @@
+import com.google.gson.Gson;
 import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -6,13 +7,9 @@ import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.input.Dragboard;
-import javafx.scene.input.MouseEvent;
-import javafx.scene.input.TransferMode;
+import javafx.scene.input.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -20,10 +17,8 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 
-import java.awt.*;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -49,14 +44,19 @@ public class ViewController {
 
     private DiskHelper diskHelper;
     private PathHelper pathHelper;
+    private Gson gsonInstance;
 
     private static Path copiedFile;
 
     private Stage stage;
+    private static final DataFormat SERIALIZED_MIME_TYPE = new DataFormat("application/x-java-serialized-object");
 
     void setStage(Stage stage) {
         this.stage = stage;
     }
+
+    //TODO Nie zaczynać od dysków na sztywno tylko dwa pierwsze
+    //TODO Wynieść metody + klasa z constami na teksty
 
     @FXML
     public void initialize() {
@@ -66,6 +66,7 @@ public class ViewController {
 
             diskHelper = new DiskHelper();
             pathHelper = new PathHelper();
+            gsonInstance = new Gson();
 
             left_table_list.setGraphic(getHeaderLayout(left_header, Position.LEFT_TABLE));
             right_table_list.setGraphic(getHeaderLayout(right_header, Position.RIGHT_TABLE));
@@ -152,17 +153,63 @@ public class ViewController {
 
     private TableRow<FileModel> configureRow(Position position) {
         final TableRow<FileModel> row = new TableRow<>();
-        row.setOnDragDetected(event -> {
-            Dragboard db = row.startDragAndDrop(TransferMode.MOVE);
-            db.setDragView(row.snapshot(null, null));
-            System.out.println(row.getItem().getName());
-            event.consume();
-        });
 
+        addDragDropEvents(position, row);
         createContextMenu(row, position);
         row.setOnMouseClicked(event -> setOnClickAction(event, row, position));
 
         return row;
+    }
+
+    private void addDragDropEvents(Position position, TableRow<FileModel> row) {
+        final String targetPath = position == Position.LEFT_TABLE ? left_header.getText() : right_header.getText();
+
+        row.setOnDragDetected(event -> {
+            if (!row.isEmpty()) {
+                FileModel model = row.getItem();
+                Dragboard db = row.startDragAndDrop(TransferMode.MOVE);
+                db.setDragView(row.snapshot(null, null));
+                ClipboardContent cc = new ClipboardContent();
+                cc.put(SERIALIZED_MIME_TYPE, gsonInstance.toJson(new DragItem(position, model)));
+                db.setContent(cc);
+                event.consume();
+            }
+        });
+
+        row.setOnDragOver(event -> {
+            Dragboard db = event.getDragboard();
+            if (db.hasContent(SERIALIZED_MIME_TYPE) && !gsonInstance.toJson(row.getItem()).equals(db.getContent(SERIALIZED_MIME_TYPE))) {
+                event.acceptTransferModes(TransferMode.COPY_OR_MOVE);
+                event.consume();
+            }
+        });
+
+        row.setOnDragDropped(event -> {
+            try {
+                Dragboard db = event.getDragboard();
+                if (db.hasContent(SERIALIZED_MIME_TYPE) && db.getContent(SERIALIZED_MIME_TYPE) instanceof String) {
+                    DragItem draggedItem = gsonInstance.fromJson(db.getContent(SERIALIZED_MIME_TYPE).toString(), DragItem.class);
+
+                    if (draggedItem.getPosition() != null && draggedItem.getPosition() != position) {
+                        Files.move(Paths.get(draggedItem.getItem().getAbsolutePath()), Paths.get(targetPath, draggedItem.getItem().getName()), StandardCopyOption.REPLACE_EXISTING);
+                        getDirectoryContent(left_header.getText(), Position.LEFT_TABLE);
+                        getDirectoryContent(right_header.getText(), Position.RIGHT_TABLE);
+                    } else {
+                        showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwe przeniesienie w obrębie tego samego katalogu.");
+                    }
+
+                    event.setDropCompleted(true);
+                    event.consume();
+                }
+            } catch (Exception ex) {
+                if (ex instanceof AccessDeniedException) {
+                    showAlert(Alert.AlertType.ERROR, "Brak uprawnień", "Brak uprawnień do umieszczenia pliku/katalogu w wybranym katalogu");
+                    return;
+                }
+                ex.printStackTrace();
+                showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Operacja nie powiodła się z powodu krytycznego błędu.");
+            }
+        });
     }
 
     private void createContextMenu(TableRow<FileModel> row, Position position) {
@@ -192,13 +239,11 @@ public class ViewController {
 
         onOpenAction(row.getItem(), position);
     }
-    
-    //TODO Dodać drag and drop pomiędzy tabelami
-    //TODO klasa z constami na teksty
+
     private void onRenameAction(Position position, FileModel model) {
         try {
 
-            if(model.isDisk()){
+            if (model.isDisk()) {
                 showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwa zmiana nazwy dysku.");
                 return;
             }
@@ -230,7 +275,7 @@ public class ViewController {
 
     private void onCopyAction(FileModel model) {
         try {
-            if(model.isDisk()){
+            if (model.isDisk()) {
                 showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwa skopiowanie całego dysku.");
                 return;
             }
@@ -248,7 +293,7 @@ public class ViewController {
 
     private void onMoveAction(FileModel model, Position position) {
         try {
-            if(model.isDisk()){
+            if (model.isDisk()) {
                 showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwe przeniesienie całego dysku.");
                 return;
             }
@@ -446,18 +491,6 @@ public class ViewController {
         }
 
         return deleteDirectory(model.getAbsolutePath());
-    }
-
-    //TODO Fix and use this
-    private void openFile() throws IOException {
-        String inputFile = "path/youtfile.ext";
-        Path tempOutput = Files.createTempFile("TempManual", ".ext");
-        tempOutput.toFile().deleteOnExit();
-        System.out.println("tempOutput: " + tempOutput);
-        try (InputStream is = ViewController.class.getClassLoader().getResourceAsStream(inputFile)) {
-            Files.copy(is, tempOutput, StandardCopyOption.REPLACE_EXISTING);
-        }
-        Desktop.getDesktop().open(tempOutput.toFile());
     }
 
     private void openFileWithCmd(String filePath) throws IOException {
