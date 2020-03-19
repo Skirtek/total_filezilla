@@ -1,4 +1,4 @@
-import javafx.scene.control.TableView;
+package models;
 
 public class DragItem {
     private Position position;

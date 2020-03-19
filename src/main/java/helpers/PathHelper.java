@@ -1,8 +1,11 @@
+package helpers;
+
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Optional;
 
 public class PathHelper {
+
     public Path getFileName(String parent, String currentPath, String newFileName){
         Optional<String> extension = getFileExtension(currentPath);
         return extension.map(s -> Paths.get(parent.concat(newFileName).concat("."+s))).orElseGet(() -> Paths.get(parent.concat(newFileName)));
@@ -10,6 +13,12 @@ public class PathHelper {
 
     public Path getDirectoryName(String parent, String newDirectoryName){
         return Paths.get(parent, newDirectoryName);
+    }
+
+    public Optional<String> getParentAbsolutePath(String childPath) {
+        Path parent = Paths.get(childPath).getParent();
+
+        return parent != null ? Optional.of(parent.toString()) : Optional.empty();
     }
 
     private Optional<String> getFileExtension(String path){

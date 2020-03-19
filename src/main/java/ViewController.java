@@ -1,4 +1,5 @@
 import com.google.gson.Gson;
+import helpers.*;
 import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -16,15 +17,16 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
+import models.*;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
 
 public class ViewController {
 
@@ -44,6 +46,9 @@ public class ViewController {
 
     private DiskHelper diskHelper;
     private PathHelper pathHelper;
+    private DialogsHelper dialogsHelper;
+    private DirectoriesHelper directoriesHelper;
+    private FilesHelper filesHelper;
     private Gson gsonInstance;
 
     private static Path copiedFile;
@@ -55,9 +60,6 @@ public class ViewController {
         this.stage = stage;
     }
 
-    //TODO Nie zaczynać od dysków na sztywno tylko dwa pierwsze
-    //TODO Wynieść metody + klasa z constami na teksty
-
     @FXML
     public void initialize() {
         try {
@@ -66,14 +68,14 @@ public class ViewController {
 
             diskHelper = new DiskHelper();
             pathHelper = new PathHelper();
+            dialogsHelper = new DialogsHelper();
+            directoriesHelper = new DirectoriesHelper();
+            filesHelper = new FilesHelper();
             gsonInstance = new Gson();
 
             left_table_list.setGraphic(getHeaderLayout(left_header, Position.LEFT_TABLE));
             right_table_list.setGraphic(getHeaderLayout(right_header, Position.RIGHT_TABLE));
-            getDirectoryContent("C:\\", Position.LEFT_TABLE);
-            getDirectoryContent("D:\\", Position.RIGHT_TABLE);
-            setCurrentPathField("C:\\", Position.LEFT_TABLE);
-            setCurrentPathField("D:\\", Position.RIGHT_TABLE);
+            initializeFilesViews();
             initializeTables();
             populateDiskPanels();
 
@@ -147,8 +149,8 @@ public class ViewController {
         left_table.setRowFactory(tableView -> configureRow(Position.LEFT_TABLE));
         right_table.setRowFactory(tableView -> configureRow(Position.RIGHT_TABLE));
 
-        left_table.setPlaceholder(new Label("Ten folder jest pusty"));
-        right_table.setPlaceholder(new Label("Ten folder jest pusty"));
+        left_table.setPlaceholder(new Label(GuiResources.EmptyDirectory));
+        right_table.setPlaceholder(new Label(GuiResources.EmptyDirectory));
     }
 
     private TableRow<FileModel> configureRow(Position position) {
@@ -195,7 +197,7 @@ public class ViewController {
                         getDirectoryContent(left_header.getText(), Position.LEFT_TABLE);
                         getDirectoryContent(right_header.getText(), Position.RIGHT_TABLE);
                     } else {
-                        showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwe przeniesienie w obrębie tego samego katalogu.");
+                        dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Nie jest możliwe przeniesienie w obrębie tego samego katalogu.");
                     }
 
                     event.setDropCompleted(true);
@@ -203,11 +205,11 @@ public class ViewController {
                 }
             } catch (Exception ex) {
                 if (ex instanceof AccessDeniedException) {
-                    showAlert(Alert.AlertType.ERROR, "Brak uprawnień", "Brak uprawnień do umieszczenia pliku/katalogu w wybranym katalogu");
+                    dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.InsufficientPermissions, "Brak uprawnień do umieszczenia pliku/katalogu w wybranym katalogu");
                     return;
                 }
                 ex.printStackTrace();
-                showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Operacja nie powiodła się z powodu krytycznego błędu.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Operacja nie powiodła się z powodu krytycznego błędu.");
             }
         });
     }
@@ -244,19 +246,19 @@ public class ViewController {
         try {
 
             if (model.isDisk()) {
-                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwa zmiana nazwy dysku.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Nie jest możliwa zmiana nazwy dysku.");
                 return;
             }
 
             String type = model.isFile() ? "pliku" : "katalogu";
-            Optional<String> result = showInputDialog("Zmiana nazwy", "Wpisz nową nazwę " + type + ":");
+            Optional<String> result = dialogsHelper.showInputDialog("Zmiana nazwy", "Wpisz nową nazwę " + type + ":");
 
             if (!result.isPresent() || !Utils.isDirectoryNameValid(result.get())) {
-                showAlert(Alert.AlertType.WARNING, "Zła nazwa " + type, "Nazwa " + type + " jest błędna lub zawiera niedozwolony znak.");
+                dialogsHelper.showAlert(Alert.AlertType.WARNING, "Zła nazwa " + type, "Nazwa " + type + " jest błędna lub zawiera niedozwolony znak.");
                 return;
             }
 
-            Optional<String> parent = getParentAbsolutePath(model.getAbsolutePath());
+            Optional<String> parent = pathHelper.getParentAbsolutePath(model.getAbsolutePath());
 
             if (parent.isPresent()) {
                 Path newPath = model.isFile()
@@ -269,14 +271,14 @@ public class ViewController {
             }
         } catch (Exception ex) {
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Zmiana nazwy " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodła się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Zmiana nazwy " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodła się z powodu krytycznego błędu.");
         }
     }
 
     private void onCopyAction(FileModel model) {
         try {
             if (model.isDisk()) {
-                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwa skopiowanie całego dysku.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Nie jest możliwa skopiowanie całego dysku.");
                 return;
             }
 
@@ -287,14 +289,14 @@ public class ViewController {
             copiedFile = Paths.get(model.getAbsolutePath());
         } catch (Exception ex) {
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Skopiowanie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Skopiowanie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
     private void onMoveAction(FileModel model, Position position) {
         try {
             if (model.isDisk()) {
-                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Nie jest możliwe przeniesienie całego dysku.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Nie jest możliwe przeniesienie całego dysku.");
                 return;
             }
 
@@ -310,7 +312,7 @@ public class ViewController {
             }
         } catch (Exception ex) {
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Przeniesienie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Przeniesienie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
@@ -320,7 +322,7 @@ public class ViewController {
             String targetPath = position == Position.LEFT_TABLE ? left_header.getText() : right_header.getText();
 
             if (!copiedFile.toFile().exists() || Utils.isNullOrWhitespace(targetPath)) {
-                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Wklejenie pliku w tym miejscu nie jest możliwe.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Wklejenie pliku w tym miejscu nie jest możliwe.");
                 return;
             }
 
@@ -336,12 +338,12 @@ public class ViewController {
             }
         } catch (Exception ex) {
             if (ex instanceof AccessDeniedException) {
-                showAlert(Alert.AlertType.ERROR, "Brak uprawnień", "Brak uprawnień do umieszczenia pliku/katalogu w wybranym katalogu");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.InsufficientPermissions, "Brak uprawnień do umieszczenia pliku/katalogu w wybranym katalogu");
                 return;
             }
 
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Wklejenie nie powiodło się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Wklejenie nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
@@ -361,7 +363,7 @@ public class ViewController {
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
-                        showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Wklejenie nie powiodło się z powodu krytycznego błędu.");
+                        dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Wklejenie nie powiodło się z powodu krytycznego błędu.");
                     }
                 });
 
@@ -373,18 +375,18 @@ public class ViewController {
     private void onNewDirectoryAction(Position position, FileModel model) {
         try {
             if (model.isDisk()) {
-                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Utworzenie nowego katalogu w tym miejscu jest niedozwolone.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Utworzenie nowego katalogu w tym miejscu jest niedozwolone.");
                 return;
             }
 
-            Optional<String> result = showInputDialog("Tworzenie katalogu", "Wpisz nazwę katalogu:");
+            Optional<String> result = dialogsHelper.showInputDialog("Tworzenie katalogu", "Wpisz nazwę katalogu:");
 
             if (!result.isPresent() || !Utils.isDirectoryNameValid(result.get())) {
-                showAlert(Alert.AlertType.WARNING, "Zła nazwa katalogu", "Nazwa katalogu jest błędna lub zawiera niedozwolony znak.");
+                dialogsHelper.showAlert(Alert.AlertType.WARNING, "Zła nazwa katalogu", "Nazwa katalogu jest błędna lub zawiera niedozwolony znak.");
                 return;
             }
 
-            Optional<String> parent = getParentAbsolutePath(model.getAbsolutePath());
+            Optional<String> parent = pathHelper.getParentAbsolutePath(model.getAbsolutePath());
 
             if (!parent.isPresent()) {
                 return;
@@ -393,31 +395,25 @@ public class ViewController {
             Path resultPath = Files.createDirectory(Paths.get(parent.get(), result.get()));
 
             if (!Files.exists(resultPath)) {
-                showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Utworzenie nowego katalogu nie powiodło się.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Utworzenie nowego katalogu nie powiodło się.");
                 return;
             }
 
             getDirectoryContent(resultPath.getParent().toString(), position);
         } catch (Exception ex) {
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Utworzenie nowego katalogu nie powiodło się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Utworzenie nowego katalogu nie powiodło się z powodu krytycznego błędu.");
         }
-    }
-
-    private Optional<String> getParentAbsolutePath(String childPath) {
-        Path parent = Paths.get(childPath).getParent();
-
-        return parent != null ? Optional.of(parent.toString()) : Optional.empty();
     }
 
     private void onRemoveAction(Position position, FileModel model) {
         try {
             if (model.isDisk()) {
-                showAlert(Alert.AlertType.ERROR, "Niedozwolona akcja", "Usunięcie partycji jest niedozwolone.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Usunięcie partycji jest niedozwolone.");
                 return;
             }
 
-            if (!getFeedbackFromConfirmationAlert("Usunięcie pliku", "Czy na pewno chcesz usunąć " + model.getName() + "?")) {
+            if (!dialogsHelper.getFeedbackFromConfirmationAlert("Usunięcie pliku", "Czy na pewno chcesz usunąć " + model.getName() + "?")) {
                 return;
             }
 
@@ -433,42 +429,14 @@ public class ViewController {
             }
         } catch (Exception ex) {
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Usunięcie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Usunięcie " + (model.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
-    }
-
-    private Optional<String> showInputDialog(String header, String message) {
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle(header);
-        dialog.setHeaderText(null);
-        dialog.setContentText(message);
-
-        return dialog.showAndWait();
-    }
-
-    private void showAlert(Alert.AlertType type, String header, String message) {
-        Alert alert = new Alert(type);
-        alert.setTitle(header);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-
-        alert.showAndWait();
-    }
-
-    private boolean getFeedbackFromConfirmationAlert(String header, String message) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle(header);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-
-        Optional<ButtonType> result = alert.showAndWait();
-        return result.isPresent() && result.get() == ButtonType.OK;
     }
 
     private void onOpenAction(FileModel rowData, Position position) {
         try {
             if (rowData.isFile()) {
-                openFileWithCmd(rowData.getAbsolutePath());
+                filesHelper.openFileWithCmd(rowData.getAbsolutePath());
                 return;
             }
 
@@ -476,34 +444,30 @@ public class ViewController {
             setCurrentPathField(rowData.getAbsolutePath(), position);
         } catch (Exception ex) {
             if (ex instanceof AccessDeniedException) {
-                showAlert(Alert.AlertType.ERROR, "Brak uprawnień", "Otwarcie " + (rowData.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu braku wymaganych uprawnień.");
+                dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.InsufficientPermissions, "Otwarcie " + (rowData.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu braku wymaganych uprawnień.");
                 return;
             }
 
             ex.printStackTrace();
-            showAlert(Alert.AlertType.ERROR, "Wystąpił krytyczny błąd", "Otwarcie " + (rowData.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
+            dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.CriticalErrorAlertTitle, "Otwarcie " + (rowData.isFile() ? "pliku" : "katalogu") + "nie powiodło się z powodu krytycznego błędu.");
         }
     }
 
     private boolean removeSelectedElement(FileModel model) {
         if (model.isFile()) {
-            return deleteFile(model.getAbsolutePath());
+            return filesHelper.deleteFile(model.getAbsolutePath());
         }
 
-        return deleteDirectory(model.getAbsolutePath());
-    }
-
-    private void openFileWithCmd(String filePath) throws IOException {
-        Runtime.getRuntime().exec("cmd /C \"\"" + filePath + "\"\"");
+        return directoriesHelper.deleteDirectory(model.getAbsolutePath());
     }
 
     private void getDirectoryContent(String directoryPath, Position position) throws IOException {
         if (position == Position.LEFT_TABLE) {
-            left_files.setAll(getCurrentDirectoryContent(directoryPath));
+            left_files.setAll(directoriesHelper.getCurrentDirectoryContent(directoryPath));
             return;
         }
 
-        right_files.setAll(getCurrentDirectoryContent(directoryPath));
+        right_files.setAll(directoriesHelper.getCurrentDirectoryContent(directoryPath));
     }
 
     private void goToParentDirectory(String currentPath, Position position) {
@@ -524,10 +488,7 @@ public class ViewController {
     }
 
     private void showDiskList(Position position) {
-        List<FileModel> disks = getDisksCollection()
-                .stream()
-                .map(disk -> new FileModel(disk.toString(), disk.toString(), false, true))
-                .collect(Collectors.toList());
+        List<FileModel> disks = getDisksList();
 
         if (position == Position.LEFT_TABLE) {
             left_header.setText("");
@@ -539,11 +500,26 @@ public class ViewController {
         right_files.setAll(disks);
     }
 
-    private List<FileModel> getCurrentDirectoryContent(String directoryPath) throws IOException {
-        return Files.walk(Paths.get(directoryPath), 1)
-                .filter(x -> Files.isReadable(x) && !x.toAbsolutePath().equals(Paths.get(directoryPath).toAbsolutePath()))
-                .map(path -> new FileModel(path.toFile().getName(), path.toAbsolutePath().toString(), path.toFile().isFile(), false))
-                .sorted()
+    private void initializeFilesViews() throws IOException {
+        List<FileModel> disks = getDisksList();
+
+        if(disks.isEmpty()){
+            return;
+        }
+
+        getDirectoryContent(disks.get(0).getAbsolutePath(), Position.LEFT_TABLE);
+        setCurrentPathField(disks.get(0).getAbsolutePath(), Position.LEFT_TABLE);
+
+        if(disks.size() > 1){
+            getDirectoryContent(disks.get(1).getAbsolutePath(), Position.RIGHT_TABLE);
+            setCurrentPathField(disks.get(1).getAbsolutePath(), Position.RIGHT_TABLE);
+        }
+    }
+
+    private List<FileModel> getDisksList(){
+        return  getDisksCollection()
+                .stream()
+                .map(disk -> new FileModel(disk.toString(), disk.toString(), false, true))
                 .collect(Collectors.toList());
     }
 
@@ -552,42 +528,5 @@ public class ViewController {
         item.setOnAction(value);
 
         return item;
-    }
-
-    private boolean deleteFile(String path) {
-        try {
-            Path fileToDelete = Paths.get(path);
-
-            if (!Files.exists(fileToDelete)) {
-                return true;
-            }
-
-            Files.delete(fileToDelete);
-
-            return !Files.exists(fileToDelete);
-        } catch (Exception ex) {
-            ex.printStackTrace();
-            return false;
-        }
-    }
-
-    private boolean deleteDirectory(String path) {
-        try {
-            Path directoryToDelete = Paths.get(path);
-
-            if (!Files.exists(directoryToDelete)) {
-                return true;
-            }
-
-            Files.walk(directoryToDelete)
-                    .sorted(Comparator.reverseOrder())
-                    .map(Path::toFile)
-                    .forEach(File::delete);
-
-            return !Files.exists(directoryToDelete);
-        } catch (Exception ex) {
-            ex.printStackTrace();
-            return false;
-        }
     }
 }

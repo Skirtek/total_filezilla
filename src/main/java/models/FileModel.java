@@ -1,3 +1,5 @@
+package models;
+
 public class FileModel implements Comparable<FileModel>{
     private String name;
     private String absolutePath;
