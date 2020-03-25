@@ -53,9 +53,9 @@ public class ViewController {
 
     private static Path copiedFile;
 
-    private Stage stage;
     private static final DataFormat SERIALIZED_MIME_TYPE = new DataFormat("application/x-java-serialized-object");
 
+    private Stage stage;
     void setStage(Stage stage) {
         this.stage = stage;
     }
@@ -436,7 +436,7 @@ public class ViewController {
     private void onOpenAction(FileModel rowData, Position position) {
         try {
             if (rowData.isFile()) {
-                filesHelper.openFileWithCmd(rowData.getAbsolutePath());
+                filesHelper.openFile(rowData.getAbsolutePath());
                 return;
             }
 
