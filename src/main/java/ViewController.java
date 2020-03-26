@@ -321,12 +321,12 @@ public class ViewController {
 
             String targetPath = position == Position.LEFT_TABLE ? left_header.getText() : right_header.getText();
 
-            if (!copiedFile.toFile().exists() || Utils.isNullOrWhitespace(targetPath)) {
+            if (!Files.exists(copiedFile) || Utils.isNullOrWhitespace(targetPath)) {
                 dialogsHelper.showAlert(Alert.AlertType.ERROR, GuiResources.ProhibitedAction, "Wklejenie pliku w tym miejscu nie jest możliwe.");
                 return;
             }
 
-            if (copiedFile.toFile().isDirectory()) {
+            if (Files.isDirectory(copiedFile)) {
                 onDirectoryPaste(targetPath, position);
                 return;
             }
@@ -504,6 +504,7 @@ public class ViewController {
         List<FileModel> disks = getDisksList();
 
         if(disks.isEmpty()){
+            dialogsHelper.showAlert(Alert.AlertType.WARNING, "Wystąpił błąd", "Nie odnaleziono żadnych dysków.");
             return;
         }
 
@@ -513,6 +514,10 @@ public class ViewController {
         if(disks.size() > 1){
             getDirectoryContent(disks.get(1).getAbsolutePath(), Position.RIGHT_TABLE);
             setCurrentPathField(disks.get(1).getAbsolutePath(), Position.RIGHT_TABLE);
+        }
+        else {
+            getDirectoryContent(disks.get(0).getAbsolutePath(), Position.LEFT_TABLE);
+            setCurrentPathField(disks.get(0).getAbsolutePath(), Position.LEFT_TABLE);
         }
     }
 
